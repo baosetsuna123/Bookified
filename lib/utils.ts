@@ -119,7 +119,7 @@ export async function parsePDFFile(file: File) {
     if (!context) {
       throw new Error('Could not get canvas context');
     }
-    //@ts-expect-error - pdfjs types are not fully compatible with TypeScript's CanvasRenderingContext2D
+
     await firstPage.render({
       canvasContext: context,
       viewport: viewport,
