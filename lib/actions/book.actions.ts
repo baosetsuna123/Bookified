@@ -6,7 +6,7 @@ import { escapeRegex, generateSlug, serializeData } from '@/lib/utils';
 import Book from '@/database/models/book.model';
 import BookSegment from '@/database/models/book-segment.model';
 import mongoose from 'mongoose';
-import { revalidatePath } from 'next/cache';
+import { getUserPlan } from '@/lib/subscription.server';
 
 export const getAllBooks = async () => {
   try {
@@ -26,7 +26,34 @@ export const getAllBooks = async () => {
     };
   }
 };
+export const searchBooks = async (query: string) => {
+  try {
+    await connectToDatabase();
 
+    if (!query || query.trim() === '') {
+      return getAllBooks();
+    }
+
+    const searchRegex = new RegExp(escapeRegex(query.trim()), 'i');
+
+    const books = await Book.find({
+      $or: [{ title: { $regex: searchRegex } }, { author: { $regex: searchRegex } }],
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return {
+      success: true,
+      data: serializeData(books),
+    };
+  } catch (e) {
+    console.error('Error searching books', e);
+    return {
+      success: false,
+      error: e,
+    };
+  }
+};
 export const checkBookExists = async (title: string) => {
   try {
     await connectToDatabase();
@@ -71,9 +98,27 @@ export const createBook = async (data: CreateBook) => {
     }
 
     // Todo: Check subscription limits before creating a book
+    const { getUserPlan } = await import('@/lib/subscription.server');
+    const { PLAN_LIMITS } = await import('@/lib/subscription-constants');
+
+    const plan = await getUserPlan();
+    const limits = PLAN_LIMITS[plan];
+
+    const bookCount = await Book.countDocuments({ clerkId: data.clerkId });
+
+    if (bookCount >= limits.maxBooks) {
+      const { revalidatePath } = await import('next/cache');
+      revalidatePath('/');
+
+      return {
+        success: false,
+        error: `You have reached the maximum number of books allowed for your ${plan} plan (${limits.maxBooks}). Please upgrade to add more books.`,
+        isBillingError: true,
+      };
+    }
 
     const book = await Book.create({ ...data, slug, totalSegments: 0 });
-    revalidatePath('/');
+
     return {
       success: true,
       data: serializeData(book),
